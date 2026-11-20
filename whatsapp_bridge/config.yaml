@@ -1,0 +1,26 @@
+name: WhatsApp Web Bridge
+version: "1.0.1"
+slug: whatsapp_web_bridge
+description: >-
+  Links a WhatsApp account to Home Assistant as a companion device using the
+  multi-device protocol, the same way WhatsApp Web and WhatsApp Desktop do.
+  Exposes a local HTTP/WebSocket API for the WhatsApp Web integration.
+url: https://github.com/chrisclayson/whatsapp-web-ha
+icon: icon.png
+logo: logo.png
+arch:
+  - aarch64
+  - amd64
+startup: services
+boot: auto
+init: false
+ports:
+  3000/tcp: 3000
+ports_description:
+  3000/tcp: Bridge API and WebSocket
+options:
+  api_token: ""
+  log_level: info
+schema:
+  api_token: password
+  log_level: list(trace|debug|info|warn|error)

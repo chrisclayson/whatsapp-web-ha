@@ -1,0 +1,12 @@
+{
+  "domain": "whatsapp_web",
+  "name": "WhatsApp Web",
+  "codeowners": ["@chrisclayson"],
+  "config_flow": true,
+  "documentation": "https://github.com/chrisclayson/whatsapp-web-ha",
+  "integration_type": "hub",
+  "iot_class": "local_push",
+  "issue_tracker": "https://github.com/chrisclayson/whatsapp-web-ha/issues",
+  "loggers": ["custom_components.whatsapp_web"],
+  "version": "1.0.1"
+}

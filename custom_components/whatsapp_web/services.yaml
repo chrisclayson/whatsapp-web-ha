@@ -1,0 +1,72 @@
+send_message:
+  name: Send message
+  description: Send a text message from the linked WhatsApp account.
+  fields:
+    entry_id:
+      name: Account
+      description: WhatsApp account to use. Optional when only one is configured.
+      selector:
+        config_entry:
+          integration: whatsapp_web
+    to:
+      name: Recipient
+      description: Phone number in international format, a contact JID, or a group JID.
+      required: true
+      example: "+15551234567"
+      selector:
+        text:
+    message:
+      name: Message
+      description: The text to send.
+      required: true
+      selector:
+        text:
+          multiline: true
+
+mark_read:
+  name: Mark chat as read
+  description: Mark a chat as read and clear its unread counter.
+  fields:
+    entry_id:
+      name: Account
+      description: WhatsApp account to use. Optional when only one is configured.
+      selector:
+        config_entry:
+          integration: whatsapp_web
+    chat:
+      name: Chat
+      description: Chat JID, for example 15551234567@s.whatsapp.net or 120363...@g.us.
+      required: true
+      selector:
+        text:
+    message_ids:
+      name: Message IDs
+      description: Specific message IDs to mark as read. Defaults to the tracked unread messages.
+      selector:
+        object:
+
+send_typing:
+  name: Send typing indicator
+  description: Show or clear a typing indicator in a WhatsApp chat.
+  fields:
+    entry_id:
+      name: Account
+      description: WhatsApp account to use. Optional when only one is configured.
+      selector:
+        config_entry:
+          integration: whatsapp_web
+    chat:
+      name: Chat
+      description: Chat JID, for example 15551234567@s.whatsapp.net.
+      required: true
+      selector:
+        text:
+    state:
+      name: State
+      description: Whether to show or clear the typing indicator.
+      default: composing
+      selector:
+        select:
+          options:
+            - composing
+            - paused

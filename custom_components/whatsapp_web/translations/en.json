@@ -1,0 +1,187 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect to your WhatsApp bridge",
+        "description": "The bridge is a small local service that links Home Assistant to WhatsApp as a companion device, the same way WhatsApp Web and WhatsApp Desktop do. Enter its address and API token.",
+        "data": {
+          "url": "Bridge URL",
+          "token": "API token"
+        }
+      },
+      "pair": {
+        "title": "Link your WhatsApp account",
+        "description": "Choose how to link this Home Assistant instance. You can also finish setup now and pair later from the integration options.",
+        "menu_options": {
+          "qr": "Scan a QR code",
+          "phone": "Link with a phone number",
+          "later": "Finish setup and pair later"
+        }
+      },
+      "qr": {
+        "title": "Scan this QR code",
+        "description": "Open WhatsApp on your phone and go to **Settings → Linked devices → Link a device**, then scan the code below. Press **Submit** after scanning. If the code expired, a fresh one is shown."
+      },
+      "phone": {
+        "title": "Link with a phone number",
+        "description": "Enter the WhatsApp phone number in international format, for example {example}. WhatsApp shows an 8-character code on the next screen.",
+        "data": {
+          "phone": "Phone number"
+        }
+      },
+      "phone_code": {
+        "title": "Enter this code on your phone",
+        "description": "On your phone open **WhatsApp → Settings → Linked devices → Link a device → Link with phone number instead** and enter:\n\n## {code}\n\nfor {phone}. Press **Submit** once you have entered the code."
+      },
+      "reauth_confirm": {
+        "title": "Update the bridge token",
+        "description": "The WhatsApp bridge at {url} rejected the stored API token. Enter the current token.",
+        "data": {
+          "token": "API token"
+        }
+      },
+      "reconfigure": {
+        "title": "Update the bridge connection",
+        "description": "Change the bridge URL or API token. The account pairing is kept.",
+        "data": {
+          "url": "Bridge URL",
+          "token": "API token"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Could not reach the WhatsApp bridge. Check that it is running and the URL is correct.",
+      "invalid_auth": "The bridge rejected the API token.",
+      "invalid_url": "Enter a valid http:// or https:// URL.",
+      "invalid_phone": "Enter a phone number in international format, including the country code.",
+      "pairing_timeout": "WhatsApp did not provide a QR or pairing code in time. Try again.",
+      "pairing_failed": "Could not complete pairing. Check the bridge log and try again.",
+      "unknown": "Unexpected error. Check the Home Assistant log for details."
+    },
+    "abort": {
+      "already_configured": "This WhatsApp bridge is already configured.",
+      "cannot_connect": "Could not reach the bridge.",
+      "qr_unavailable": "The bridge did not return a QR code. Check the bridge log and try again.",
+      "reauth_failed": "Could not start reauthentication.",
+      "reauth_successful": "Reauthentication was successful.",
+      "reconfigure_failed": "Could not reconfigure the integration.",
+      "reconfigure_successful": "The bridge connection was updated."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "WhatsApp Web options",
+        "description": "Choose what to configure.",
+        "menu_options": {
+          "settings": "Settings",
+          "pair": "Pair or re-pair the account"
+        }
+      },
+      "settings": {
+        "title": "WhatsApp Web settings",
+        "description": "The polling interval is only a fallback: messages and unread counts are pushed over a WebSocket.",
+        "data": {
+          "url": "Bridge URL",
+          "token": "API token",
+          "poll_interval": "Fallback poll interval (seconds)",
+          "fire_outgoing_events": "Fire events for messages sent from the phone"
+        }
+      },
+      "pair": {
+        "title": "Pair or re-pair",
+        "description": "Use this after logging out on the phone or linking a different account.",
+        "menu_options": {
+          "qr": "Scan a QR code",
+          "phone": "Link with a phone number",
+          "later": "Cancel"
+        }
+      },
+      "qr": {
+        "title": "Scan this QR code",
+        "description": "Open WhatsApp on your phone and go to **Settings → Linked devices → Link a device**, then scan the code below. Press **Submit** after scanning. If the code expired, a fresh one is shown."
+      },
+      "phone": {
+        "title": "Link with a phone number",
+        "description": "Enter the WhatsApp phone number in international format, for example {example}. WhatsApp shows an 8-character code on the next screen.",
+        "data": {
+          "phone": "Phone number"
+        }
+      },
+      "phone_code": {
+        "title": "Enter this code on your phone",
+        "description": "On your phone open **WhatsApp → Settings → Linked devices → Link a device → Link with phone number instead** and enter:\n\n## {code}\n\nfor {phone}. Press **Submit** once you have entered the code."
+      }
+    },
+    "error": {
+      "cannot_connect": "Could not reach the WhatsApp bridge. Check that it is running and the URL is correct.",
+      "invalid_auth": "The bridge rejected the API token.",
+      "invalid_url": "Enter a valid http:// or https:// URL.",
+      "invalid_phone": "Enter a phone number in international format, including the country code.",
+      "pairing_timeout": "WhatsApp did not provide a QR or pairing code in time. Try again.",
+      "pairing_failed": "Could not complete pairing. Check the bridge log and try again.",
+      "unknown": "Unexpected error. Check the Home Assistant log for details."
+    },
+    "abort": {
+      "cannot_connect": "Could not reach the bridge.",
+      "qr_unavailable": "The bridge did not return a QR code. Check the bridge log and try again.",
+      "pairing_failed": "Could not complete pairing."
+    }
+  },
+  "services": {
+    "send_message": {
+      "name": "Send message",
+      "description": "Send a text message from the linked WhatsApp account.",
+      "fields": {
+        "entry_id": {
+          "name": "Account",
+          "description": "WhatsApp account to use. Optional when only one is configured."
+        },
+        "to": {
+          "name": "Recipient",
+          "description": "Phone number in international format, a contact JID, or a group JID."
+        },
+        "message": {
+          "name": "Message",
+          "description": "The text to send."
+        }
+      }
+    },
+    "mark_read": {
+      "name": "Mark chat as read",
+      "description": "Mark a chat as read and clear its unread counter.",
+      "fields": {
+        "entry_id": {
+          "name": "Account",
+          "description": "WhatsApp account to use. Optional when only one is configured."
+        },
+        "chat": {
+          "name": "Chat",
+          "description": "Chat JID, for example 15551234567@s.whatsapp.net."
+        },
+        "message_ids": {
+          "name": "Message IDs",
+          "description": "Specific message IDs to mark as read. Defaults to the tracked unread messages."
+        }
+      }
+    },
+    "send_typing": {
+      "name": "Send typing indicator",
+      "description": "Show or clear a typing indicator in a WhatsApp chat.",
+      "fields": {
+        "entry_id": {
+          "name": "Account",
+          "description": "WhatsApp account to use. Optional when only one is configured."
+        },
+        "chat": {
+          "name": "Chat",
+          "description": "Chat JID, for example 15551234567@s.whatsapp.net."
+        },
+        "state": {
+          "name": "State",
+          "description": "Whether to show or clear the typing indicator."
+        }
+      }
+    }
+  }
+}

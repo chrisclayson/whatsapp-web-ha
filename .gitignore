@@ -1,0 +1,11 @@
+.venv*/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+node_modules/
+whatsapp_bridge/data/
+data/
+.env
+*.log
+.DS_Store

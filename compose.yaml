@@ -1,0 +1,35 @@
+services:
+  home-assistant:
+    image: homeassistant/home-assistant:stable
+    container_name: home-assistant
+    ports:
+      - "8123:8123"
+      - "5678:5678"
+    environment:
+      TZ: Europe/London
+      PUID: 1000
+      PGID: 1000
+      PACKAGES: iputils
+      UMASK: 007
+    volumes:
+      - ./config/configuration.yaml:/config/configuration.yaml
+      - ./custom_components:/config/custom_components
+      - /var/run/docker.sock:/var/run/docker.sock
+
+  whatsapp-bridge:
+    build:
+      context: ./whatsapp_bridge
+    container_name: whatsapp-bridge
+    restart: unless-stopped
+    command: ["node", "src/index.js"]
+    environment:
+      BRIDGE_TOKEN: ${BRIDGE_TOKEN:?Set BRIDGE_TOKEN in .env (see .env.example)}
+      BRIDGE_DATA_DIR: /data
+      BRIDGE_LOG_LEVEL: ${BRIDGE_LOG_LEVEL:-info}
+    ports:
+      - "3000:3000"
+    volumes:
+      - whatsapp_data:/data
+
+volumes:
+  whatsapp_data:
