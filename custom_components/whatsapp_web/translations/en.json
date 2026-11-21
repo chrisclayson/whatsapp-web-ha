@@ -20,7 +20,7 @@
       },
       "qr": {
         "title": "Scan this QR code",
-        "description": "Open WhatsApp on your phone and go to **Settings → Linked devices → Link a device**, then scan the code below. Press **Submit** after scanning. If the code expired, a fresh one is shown."
+        "description": "Open WhatsApp on your phone and go to **Settings \u2192 Linked devices \u2192 Link a device**, then scan the code below. Press **Submit** after scanning. If the code expired, a fresh one is shown."
       },
       "phone": {
         "title": "Link with a phone number",
@@ -31,7 +31,7 @@
       },
       "phone_code": {
         "title": "Enter this code on your phone",
-        "description": "On your phone open **WhatsApp → Settings → Linked devices → Link a device → Link with phone number instead** and enter:\n\n## {code}\n\nfor {phone}. Press **Submit** once you have entered the code."
+        "description": "On your phone open **WhatsApp \u2192 Settings \u2192 Linked devices \u2192 Link a device \u2192 Link with phone number instead** and enter:\n\n## {code}\n\nfor {phone}. Press **Submit** once you have entered the code."
       },
       "reauth_confirm": {
         "title": "Update the bridge token",
@@ -85,7 +85,13 @@
           "url": "Bridge URL",
           "token": "API token",
           "poll_interval": "Fallback poll interval (seconds)",
-          "fire_outgoing_events": "Fire events for messages sent from the phone"
+          "fire_outgoing_events": "Fire events for messages sent from the phone",
+          "notify_on_message": "Notify on received messages",
+          "notify_service": "Notify service (optional)"
+        },
+        "data_description": {
+          "notify_on_message": "Create a notification for every message received from someone else.",
+          "notify_service": "Leave empty for a persistent Home Assistant notification, or enter a notify service such as notify.mobile_app_phone."
         }
       },
       "pair": {
@@ -99,7 +105,7 @@
       },
       "qr": {
         "title": "Scan this QR code",
-        "description": "Open WhatsApp on your phone and go to **Settings → Linked devices → Link a device**, then scan the code below. Press **Submit** after scanning. If the code expired, a fresh one is shown."
+        "description": "Open WhatsApp on your phone and go to **Settings \u2192 Linked devices \u2192 Link a device**, then scan the code below. Press **Submit** after scanning. If the code expired, a fresh one is shown."
       },
       "phone": {
         "title": "Link with a phone number",
@@ -110,7 +116,7 @@
       },
       "phone_code": {
         "title": "Enter this code on your phone",
-        "description": "On your phone open **WhatsApp → Settings → Linked devices → Link a device → Link with phone number instead** and enter:\n\n## {code}\n\nfor {phone}. Press **Submit** once you have entered the code."
+        "description": "On your phone open **WhatsApp \u2192 Settings \u2192 Linked devices \u2192 Link a device \u2192 Link with phone number instead** and enter:\n\n## {code}\n\nfor {phone}. Press **Submit** once you have entered the code."
       }
     },
     "error": {
@@ -120,7 +126,8 @@
       "invalid_phone": "Enter a phone number in international format, including the country code.",
       "pairing_timeout": "WhatsApp did not provide a QR or pairing code in time. Try again.",
       "pairing_failed": "Could not complete pairing. Check the bridge log and try again.",
-      "unknown": "Unexpected error. Check the Home Assistant log for details."
+      "unknown": "Unexpected error. Check the Home Assistant log for details.",
+      "invalid_notify_service": "That notify service is not available. Use a service such as notify.mobile_app_phone, or leave the field empty for a persistent notification."
     },
     "abort": {
       "cannot_connect": "Could not reach the bridge.",

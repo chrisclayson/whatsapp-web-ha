@@ -256,7 +256,7 @@ Returns up to 500 known chats, newest activity first.
 ## `GET /api/version`
 
 ```json
-{ "version": "1.0.2", "instance_id": "3f2c…" }
+{ "version": "1.0.3", "instance_id": "3f2c…" }
 ```
 
 ---

@@ -8,6 +8,10 @@ from homeassistant.data_entry_flow import FlowResultType
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.whatsapp_web.const import (
+    CONF_FIRE_OUTGOING_EVENTS,
+    CONF_NOTIFY_ON_MESSAGE,
+    CONF_NOTIFY_SERVICE,
+    CONF_POLL_INTERVAL,
     CONF_TOKEN,
     CONF_URL,
     DOMAIN,
@@ -237,3 +241,43 @@ async def test_reauth_and_reconfigure_forms(hass: HomeAssistant) -> None:
     )
     assert reconfigure["type"] is FlowResultType.FORM
     assert reconfigure["step_id"] == "reconfigure"
+
+
+async def test_options_settings_saves_notification_options(
+    hass: HomeAssistant, aioclient_mock
+) -> None:
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="instance-1",
+        title="Tester",
+        data={CONF_URL: URL, CONF_TOKEN: TOKEN},
+    )
+    entry.add_to_hass(hass)
+
+    async def handler(call):
+        return None
+
+    hass.services.async_register("notify", "test", handler)
+    aioclient_mock.get(f"{URL}/api/state", json=CONNECTED_STATE)
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"next_step_id": "settings"}
+    )
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "settings"
+
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        {
+            CONF_URL: URL,
+            CONF_TOKEN: TOKEN,
+            CONF_POLL_INTERVAL: 30,
+            CONF_FIRE_OUTGOING_EVENTS: False,
+            CONF_NOTIFY_ON_MESSAGE: True,
+            CONF_NOTIFY_SERVICE: "notify.test",
+        },
+    )
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert entry.options[CONF_NOTIFY_ON_MESSAGE] is True
+    assert entry.options[CONF_NOTIFY_SERVICE] == "notify.test"

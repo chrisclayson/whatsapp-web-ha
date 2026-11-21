@@ -24,6 +24,9 @@ use incoming messages in automations.
   group metadata; falls back to `unknown`, never a phone number.
 - **Messages card**: a bundled dashboard card showing recent received messages
   only — your replies are excluded.
+- **Notifications**: optionally raise a persistent Home Assistant notification
+  or call a `notify.*` service with the sender, group and message text (emoji
+  preserved).
 - **Services** to send a text, mark a chat read, and send a typing indicator.
 - **Persistent session**: pair once, keep the session across restarts.
 
@@ -284,6 +287,48 @@ A full set of examples is in [docs/automations.md](docs/automations.md).
 
 This is deliberately a *per-linked-device* count, matching how WhatsApp Web
 shows unread state. It is not a full server-side mailbox mirror.
+
+---
+
+## Notifications
+
+Enable notifications under **Settings → Devices & services → WhatsApp Web →
+Configure → Settings**:
+
+- **Notify on received messages** — create a notification for every incoming
+  message.
+- **Notify service (optional)** — for example `notify.mobile_app_phone`, or just
+  `mobile_app_phone`. Leave empty to use a persistent Home Assistant
+  notification.
+
+Notifications are only created for received messages; replies you send never
+trigger them.
+
+Direct message format:
+
+```text
+Title: WhatsApp: Alice
+Body:
+Alice:
+Hello 👋
+```
+
+Group message format:
+
+```text
+Title: WhatsApp: Family
+Body:
+Alice (Family):
+Dinner at 7? 🍕
+```
+
+Media without a caption appears as `[Photo]`, `[Voice message]`, `[Document]`,
+and so on. Emoji and line breaks from the original message are preserved.
+
+Persistent notifications are grouped per chat: a newer message replaces the
+previous notification for that chat. A configured `notify.*` service receives a
+separate call for every message. If the configured service disappears, the
+integration logs a warning and falls back to a persistent notification.
 
 ---
 

@@ -33,6 +33,8 @@ from .bridge import (
 )
 from .const import (
     CONF_FIRE_OUTGOING_EVENTS,
+    CONF_NOTIFY_ON_MESSAGE,
+    CONF_NOTIFY_SERVICE,
     CONF_POLL_INTERVAL,
     CONF_TOKEN,
     CONF_URL,
@@ -41,6 +43,7 @@ from .const import (
     DOMAIN,
     STATE_CONNECTED,
 )
+from .notification_text import parse_notify_service
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -445,40 +448,56 @@ class WhatsAppWebOptionsFlow(PairingFlowMixin, OptionsFlow):
     ) -> ConfigFlowResult:
         entry = self.config_entry
         errors: dict[str, str] = {}
+        notify_service = str(
+            (user_input or {}).get(CONF_NOTIFY_SERVICE)
+            or entry.options.get(CONF_NOTIFY_SERVICE, "")
+        ).strip()
 
         if user_input is not None:
-            try:
-                client = BridgeClient(
-                    async_get_clientsession(self.hass),
-                    user_input[CONF_URL],
-                    user_input[CONF_TOKEN],
-                )
-                await client.get_state()
-            except ValueError:
-                errors["base"] = "invalid_url"
-            except BridgeAuthError:
-                errors["base"] = "invalid_auth"
-            except BridgeConnectionError:
-                errors["base"] = "cannot_connect"
-            except BridgeError:
-                errors["base"] = "unknown"
-            else:
-                self.hass.config_entries.async_update_entry(
-                    entry,
-                    data={
-                        CONF_URL: client.base_url,
-                        CONF_TOKEN: user_input[CONF_TOKEN],
-                    },
-                )
-                return self.async_create_entry(
-                    title="",
-                    data={
-                        CONF_POLL_INTERVAL: user_input[CONF_POLL_INTERVAL],
-                        CONF_FIRE_OUTGOING_EVENTS: user_input[
-                            CONF_FIRE_OUTGOING_EVENTS
-                        ],
-                    },
-                )
+            parsed_service = parse_notify_service(notify_service)
+            if notify_service and (
+                parsed_service is None
+                or not self.hass.services.has_service(*parsed_service)
+            ):
+                errors[CONF_NOTIFY_SERVICE] = "invalid_notify_service"
+
+            if not errors:
+                try:
+                    client = BridgeClient(
+                        async_get_clientsession(self.hass),
+                        user_input[CONF_URL],
+                        user_input[CONF_TOKEN],
+                    )
+                    await client.get_state()
+                except ValueError:
+                    errors["base"] = "invalid_url"
+                except BridgeAuthError:
+                    errors["base"] = "invalid_auth"
+                except BridgeConnectionError:
+                    errors["base"] = "cannot_connect"
+                except BridgeError:
+                    errors["base"] = "unknown"
+                else:
+                    self.hass.config_entries.async_update_entry(
+                        entry,
+                        data={
+                            CONF_URL: client.base_url,
+                            CONF_TOKEN: user_input[CONF_TOKEN],
+                        },
+                    )
+                    return self.async_create_entry(
+                        title="",
+                        data={
+                            CONF_POLL_INTERVAL: user_input[CONF_POLL_INTERVAL],
+                            CONF_FIRE_OUTGOING_EVENTS: user_input[
+                                CONF_FIRE_OUTGOING_EVENTS
+                            ],
+                            CONF_NOTIFY_ON_MESSAGE: user_input[
+                                CONF_NOTIFY_ON_MESSAGE
+                            ],
+                            CONF_NOTIFY_SERVICE: notify_service,
+                        },
+                    )
 
         return self.async_show_form(
             step_id="settings",
@@ -506,6 +525,18 @@ class WhatsAppWebOptionsFlow(PairingFlowMixin, OptionsFlow):
                             CONF_FIRE_OUTGOING_EVENTS, False
                         ),
                     ): cv.boolean,
+                    vol.Required(
+                        CONF_NOTIFY_ON_MESSAGE,
+                        default=entry.options.get(
+                            CONF_NOTIFY_ON_MESSAGE, False
+                        ),
+                    ): cv.boolean,
+                    vol.Optional(
+                        CONF_NOTIFY_SERVICE,
+                        default=entry.options.get(CONF_NOTIFY_SERVICE, ""),
+                    ): TextSelector(
+                        TextSelectorConfig(type=TextSelectorType.TEXT)
+                    ),
                 }
             ),
             errors=errors,

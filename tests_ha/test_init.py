@@ -10,6 +10,8 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.whatsapp_web.bridge import BridgeClient
 from custom_components.whatsapp_web.const import (
+    CONF_NOTIFY_ON_MESSAGE,
+    CONF_NOTIFY_SERVICE,
     CONF_TOKEN,
     CONF_URL,
     DOMAIN,
@@ -46,7 +48,7 @@ MESSAGE = {
     "sender_name": "Alice",
     "from_me": False,
     "type": "text",
-    "text": "hello from Alice",
+    "text": "hello from Alice 👋",
     "timestamp": 1700000000,
     "has_media": False,
     "media": None,
@@ -69,7 +71,7 @@ OUTGOING = {
 
 
 async def _setup_entry(
-    hass: HomeAssistant, monkeypatch, extra_frames=()
+    hass: HomeAssistant, monkeypatch, extra_frames=(), options=None
 ) -> MockConfigEntry:
     async def fake_get_state(self):
         return STATE
@@ -104,6 +106,7 @@ async def _setup_entry(
         unique_id="instance-1",
         title="Tester",
         data={CONF_URL: URL, CONF_TOKEN: TOKEN},
+        options=options or {},
     )
     entry.add_to_hass(hass)
     assert await hass.config_entries.async_setup(entry.entry_id)
@@ -133,7 +136,7 @@ async def test_entities_and_events(hass: HomeAssistant, monkeypatch) -> None:
     assert unread.state == "2"
     assert unread.attributes["connected"] is True
     assert unread.attributes["account"] == "15550000000@s.whatsapp.net"
-    assert unread.attributes["last_message"] == "hello from Alice"
+    assert unread.attributes["last_message"] == "hello from Alice 👋"
     assert unread.attributes["chats"][0]["name"] == "Alice"
     assert unread.attributes["chats"][0]["unread"] == 2
 
@@ -141,23 +144,23 @@ async def test_entities_and_events(hass: HomeAssistant, monkeypatch) -> None:
     assert connected.state == STATE_ON
 
     last_message = _state_for(hass, "sensor", "_last_message")
-    assert last_message.state == "hello from Alice"
+    assert last_message.state == "hello from Alice 👋"
     assert last_message.attributes["chat_name"] == "Alice"
 
     received = _state_for(hass, "sensor", "_received_messages")
     assert received.state == "1"
     assert len(received.attributes["messages"]) == 1
-    assert received.attributes["messages"][0]["text"] == "hello from Alice"
+    assert received.attributes["messages"][0]["text"] == "hello from Alice 👋"
     assert received.attributes["messages"][0]["from_me"] is False
 
     message_event = _state_for(hass, "event", "_message")
     assert message_event.attributes["event_type"] == "message_received"
-    assert message_event.attributes["text"] == "hello from Alice"
+    assert message_event.attributes["text"] == "hello from Alice 👋"
     assert message_event.attributes["sender_name"] == "Alice"
     assert message_event.attributes["group_name"] is None
 
     assert len(events) == 1
-    assert events[0]["text"] == "hello from Alice"
+    assert events[0]["text"] == "hello from Alice 👋"
     assert events[0]["chat_name"] == "Alice"
     assert events[0]["entry_id"] == entry.entry_id
 
@@ -246,13 +249,71 @@ async def test_received_buffer_excludes_outgoing(
     received = _state_for(hass, "sensor", "_received_messages")
     assert received.state == "1"
     assert [m["text"] for m in received.attributes["messages"]] == [
-        "hello from Alice"
+        "hello from Alice 👋"
     ]
     assert all(not m["from_me"] for m in received.attributes["messages"])
 
     # Outgoing events stay off by default.
-    assert [event["text"] for event in events] == ["hello from Alice"]
+    assert [event["text"] for event in events] == ["hello from Alice 👋"]
 
     unsub()
+    await hass.config_entries.async_unload(entry.entry_id)
+    await hass.async_block_till_done()
+
+
+async def test_notify_service_receives_message(
+    hass: HomeAssistant, monkeypatch
+) -> None:
+    calls = []
+
+    async def handler(call):
+        calls.append(call.data)
+
+    hass.services.async_register("notify", "test", handler)
+    entry = await _setup_entry(
+        hass,
+        monkeypatch,
+        options={
+            CONF_NOTIFY_ON_MESSAGE: True,
+            CONF_NOTIFY_SERVICE: "notify.test",
+        },
+    )
+    await asyncio.sleep(0.05)
+    await hass.async_block_till_done()
+
+    assert calls
+    assert calls[0] == {
+        "title": "WhatsApp: Alice",
+        "message": "Alice:\nhello from Alice 👋",
+    }
+
+    await hass.config_entries.async_unload(entry.entry_id)
+    await hass.async_block_till_done()
+
+
+async def test_persistent_notification_fallback(
+    hass: HomeAssistant, monkeypatch
+) -> None:
+    from homeassistant.components import persistent_notification
+
+    entry = await _setup_entry(
+        hass,
+        monkeypatch,
+        options={CONF_NOTIFY_ON_MESSAGE: True},
+    )
+    await asyncio.sleep(0.05)
+    await hass.async_block_till_done()
+
+    notifications = persistent_notification._async_get_or_create_notifications(
+        hass
+    )
+    matches = [
+        notification
+        for notification in notifications.values()
+        if notification.get("title") == "WhatsApp: Alice"
+        and "hello from Alice 👋" in notification.get("message", "")
+    ]
+    assert matches
+
     await hass.config_entries.async_unload(entry.entry_id)
     await hass.async_block_till_done()

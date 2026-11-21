@@ -30,6 +30,7 @@ from .bridge import (
 from .const import (
     CARD_URL,
     CONF_FIRE_OUTGOING_EVENTS,
+    CONF_NOTIFY_ON_MESSAGE,
     CONF_POLL_INTERVAL,
     CONF_TOKEN,
     CONF_URL,
@@ -43,6 +44,7 @@ from .const import (
 )
 from .coordinator import WhatsAppCoordinator
 from .events import build_message_payload
+from .notifications import async_notify
 from .services import async_setup_services
 
 _LOGGER = logging.getLogger(__name__)
@@ -231,12 +233,18 @@ def _handle_frame(
         state["last_message"] = payload
         coordinator.async_set_updated_data(state)
 
-        if not payload["from_me"] and _remember_message(runtime, payload):
+        if (
+            not payload["from_me"]
+            and payload.get("type") not in {"reaction", "protocol"}
+            and _remember_message(runtime, payload)
+        ):
             if runtime.store is not None:
                 runtime.store.async_delay_save(
                     lambda: list(runtime.messages), 2
                 )
             async_dispatcher_send(hass, messages_signal(entry.entry_id))
+            if entry.options.get(CONF_NOTIFY_ON_MESSAGE, False):
+                hass.async_create_task(async_notify(hass, entry, payload))
 
         if payload["from_me"] and not entry.options.get(
             CONF_FIRE_OUTGOING_EVENTS, False
@@ -276,7 +284,7 @@ def _remember_message(
     key = (item["chat_id"], item["message_id"])
     if item["message_id"] and any(
         (existing.get("chat_id"), existing.get("message_id")) == key
-        for existing in runtime.messages[-10:]
+        for existing in runtime.messages
     ):
         return False
 

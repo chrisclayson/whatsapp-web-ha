@@ -1,5 +1,5 @@
 name: WhatsApp Web Bridge
-version: "1.0.2"
+version: "1.0.3"
 slug: whatsapp_web_bridge
 description: >-
   Links a WhatsApp account to Home Assistant as a companion device using the

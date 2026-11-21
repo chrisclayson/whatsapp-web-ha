@@ -12,5 +12,5 @@
   "loggers": [
     "custom_components.whatsapp_web"
   ],
-  "version": "1.0.2"
+  "version": "1.0.3"
 }

@@ -9,6 +9,8 @@ CONF_URL = "url"
 CONF_TOKEN = "token"
 CONF_POLL_INTERVAL = "poll_interval"
 CONF_FIRE_OUTGOING_EVENTS = "fire_outgoing_events"
+CONF_NOTIFY_ON_MESSAGE = "notify_on_message"
+CONF_NOTIFY_SERVICE = "notify_service"
 
 DEFAULT_URL = "http://homeassistant.local:3000"
 DEFAULT_POLL_INTERVAL = 30
