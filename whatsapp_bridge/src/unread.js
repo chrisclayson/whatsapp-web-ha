@@ -1,27 +1,32 @@
 import {
   isCountableChat,
   isGroupJid,
+  isPhoneLike,
+  nowSeconds,
   toSeconds,
   truncate,
 } from './util.js';
 
 /**
- * Tracks per-chat unread counters and the last message seen in each chat.
+ * Tracks per-chat unread counters, names and the last message seen.
  *
  * Baileys is not a chat store, so its `unreadCount` values have two different
  * meanings:
  *
  * - `chats.update` from a new message carries a *delta* (normally 1), not the
- *   absolute badge. Adding it to a base count would be correct, but treating
- *   it as absolute (a tempting mistake) resets the badge on every message.
+ *   absolute badge.
  * - History sync and app-state sync carry absolute values: `unreadCount: 0`
  *   means "read on some device", `-1` means "mark as unread", and a positive
  *   value from `messaging-history.set` is the phone's real badge.
  *
  * The bridge therefore counts live incoming messages itself (deduplicated by
- * message ID), seeds the badge from history on first link, and uses chat
- * updates for read/unread transitions only. This is predictable and keeps the
- * count in sync when a chat is read on the phone.
+ * message ID), seeds the badge from history, and uses chat updates for
+ * read/unread transitions only.
+ *
+ * WhatsApp may address the same conversation as either a LID (`@lid`) or a
+ * phone-number JID (`@s.whatsapp.net`). Aliases are collapsed onto the PN JID
+ * so a read on the phone resets the same chat the message arrived in, and a
+ * contact name found under one identifier is used for the other.
  */
 export class UnreadTracker {
   constructor({ maxChats = 500, maxRecentKeys = 30 } = {}) {
@@ -29,6 +34,115 @@ export class UnreadTracker {
     this.maxRecentKeys = maxRecentKeys;
     this.chats = new Map();
     this.contactNames = new Map();
+    this.usernames = new Map();
+    this.aliases = new Map();
+  }
+
+  canonical(id) {
+    if (!id) return id;
+    let current = id;
+    for (let i = 0; i < 8; i += 1) {
+      const next = this.aliases.get(current);
+      if (!next || next === current) break;
+      current = next;
+    }
+    return current;
+  }
+
+  #pickCanonical(a, b) {
+    if (a.endsWith('@g.us') || b.endsWith('@g.us')) {
+      return a.endsWith('@g.us') ? a : b;
+    }
+    const aPn = a.endsWith('@s.whatsapp.net');
+    const bPn = b.endsWith('@s.whatsapp.net');
+    if (aPn && !bPn) return a;
+    if (bPn && !aPn) return b;
+    return a;
+  }
+
+  /**
+   * Register that two JIDs address the same conversation (LID and PN).
+   * Existing chat state is merged onto the preferred identifier.
+   */
+  registerAlias(a, b) {
+    if (!a || !b || a === b) return;
+    if (!isCountableChat(a) || !isCountableChat(b)) return;
+
+    const canonicalA = this.canonical(a);
+    const canonicalB = this.canonical(b);
+    if (canonicalA === canonicalB) return;
+
+    const canonicalId = this.#pickCanonical(canonicalA, canonicalB);
+    const mergedId = canonicalId === canonicalA ? canonicalB : canonicalA;
+
+    for (const [id, target] of this.aliases) {
+      if (target === mergedId) this.aliases.set(id, canonicalId);
+    }
+    this.aliases.set(mergedId, canonicalId);
+    this.aliases.set(canonicalId, canonicalId);
+
+    this.#mergeChats(mergedId, canonicalId);
+
+    const mergedName = this.contactNames.get(mergedId);
+    if (mergedName && !this.contactNames.get(canonicalId)) {
+      this.contactNames.set(canonicalId, mergedName);
+    }
+    this.contactNames.delete(mergedId);
+
+    const mergedUsername = this.usernames.get(mergedId);
+    if (mergedUsername && !this.usernames.get(canonicalId)) {
+      this.usernames.set(canonicalId, mergedUsername);
+    }
+    this.usernames.delete(mergedId);
+  }
+
+  registerAliasesFromKey(key) {
+    if (!key) return;
+    if (key.remoteJid && key.remoteJidAlt) {
+      this.registerAlias(key.remoteJid, key.remoteJidAlt);
+    }
+    if (key.participant && key.participantAlt) {
+      this.registerAlias(key.participant, key.participantAlt);
+    }
+  }
+
+  #mergeChats(fromId, toId) {
+    const from = this.chats.get(fromId);
+    if (!from) return;
+    const to = this.#ensure(toId);
+    const fromReadAt = from.readAt || 0;
+    const toReadAt = to.readAt || 0;
+    const newerRead = fromReadAt > toReadAt ? from : to;
+    const other = newerRead === from ? to : from;
+    const otherLast = other.lastMessage?.timestamp || other.timestamp || 0;
+    if ((newerRead.readAt || 0) > otherLast) {
+      // One side was read after the other side's newest message, so its
+      // (usually zero) counter is the current state.
+      to.unread = newerRead.unread;
+    } else {
+      to.unread = Math.max(to.unread, from.unread);
+    }
+    to.readAt = Math.max(fromReadAt, toReadAt);
+    to.isGroup = to.isGroup || from.isGroup;
+    if (!to.name && from.name) to.name = from.name;
+    if ((from.timestamp || 0) > (to.timestamp || 0)) {
+      to.timestamp = from.timestamp;
+      if (from.lastMessage) to.lastMessage = from.lastMessage;
+    }
+    const keys = [...to.recentKeys, ...from.recentKeys];
+    const seen = new Set();
+    to.recentKeys = keys
+      .filter((key) => {
+        if (!key?.id || seen.has(key.id)) return false;
+        seen.add(key.id);
+        return true;
+      })
+      .sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0))
+      .slice(0, this.maxRecentKeys);
+    to.countedIds = [
+      ...new Set([...to.countedIds, ...from.countedIds]),
+    ].slice(-200);
+    this.chats.delete(fromId);
   }
 
   #ensure(id) {
@@ -39,6 +153,7 @@ export class UnreadTracker {
         name: null,
         isGroup: isGroupJid(id),
         unread: 0,
+        readAt: 0,
         timestamp: 0,
         lastMessage: null,
         recentKeys: [],
@@ -66,7 +181,17 @@ export class UnreadTracker {
   }
 
   nameFor(id) {
-    return this.chats.get(id)?.name ?? this.contactNames.get(id) ?? null;
+    const canonicalId = this.canonical(id);
+    return (
+      this.chats.get(canonicalId)?.name ??
+      this.contactNames.get(canonicalId) ??
+      this.usernames.get(canonicalId) ??
+      null
+    );
+  }
+
+  usernameFor(id) {
+    return this.usernames.get(this.canonical(id)) ?? null;
   }
 
   total() {
@@ -86,7 +211,7 @@ export class UnreadTracker {
    */
   applyChat(update, { seed = false } = {}) {
     if (!update?.id || !isCountableChat(update.id)) return false;
-    const id = update.id;
+    const id = this.canonical(update.id);
     const chat = this.#ensure(id);
     let changed = false;
 
@@ -95,7 +220,7 @@ export class UnreadTracker {
       chat.name = truncate(name.trim(), 120);
       changed = true;
     } else if (!chat.name) {
-      const preferred = this.contactNames.get(id);
+      const preferred = this.nameFor(id);
       if (preferred) {
         chat.name = preferred;
         changed = true;
@@ -108,6 +233,7 @@ export class UnreadTracker {
     ) {
       if (update.unreadCount === 0) {
         // Read on this device or on the phone (app-state sync).
+        chat.readAt = nowSeconds();
         if (chat.unread !== 0) {
           chat.unread = 0;
           chat.countedIds = [];
@@ -151,20 +277,20 @@ export class UnreadTracker {
    */
   noteMessage(message, { countUnread = false } = {}) {
     if (!message?.chatId || !isCountableChat(message.chatId)) return null;
-    const chat = this.#ensure(message.chatId);
+    const chat = this.#ensure(this.canonical(message.chatId));
     const ts = toSeconds(message.timestamp);
 
-    if (!chat.name && !message.isGroup && message.chatName) {
+    if (!chat.name && message.isGroup && message.chatName) {
       chat.name = truncate(message.chatName, 120);
     }
-    if (!chat.name && message.isGroup && message.chatName) {
+    if (!chat.name && !message.isGroup && message.chatName) {
       chat.name = truncate(message.chatName, 120);
     }
     if (!chat.name && !message.isGroup && !message.fromMe && message.senderName) {
       chat.name = truncate(message.senderName, 120);
     }
     if (!chat.name) {
-      const preferred = this.contactNames.get(message.chatId);
+      const preferred = this.nameFor(chat.id);
       if (preferred) chat.name = preferred;
     }
     if (ts >= chat.timestamp) chat.timestamp = ts;
@@ -175,7 +301,9 @@ export class UnreadTracker {
       type: message.type ?? 'unknown',
       timestamp: ts,
       from_me: Boolean(message.fromMe),
-      sender_name: truncate(message.senderName ?? '', 120) || null,
+      sender_name: truncate(message.senderName || 'unknown', 120),
+      sender_username: message.senderUsername ?? null,
+      group_name: message.isGroup ? message.chatName || 'unknown' : null,
     };
 
     if (!message.fromMe && message.messageId) {
@@ -206,13 +334,32 @@ export class UnreadTracker {
   }
 
   markRead(chatId) {
-    const chat = this.chats.get(chatId);
+    const chat = this.chats.get(this.canonical(chatId));
     if (!chat) return false;
     const changed = chat.unread !== 0;
     chat.unread = 0;
+    chat.readAt = nowSeconds();
     chat.recentKeys = [];
     chat.countedIds = [];
     return changed;
+  }
+
+  markReadByMessageId(messageId, chatId) {
+    const preferred = this.chats.get(this.canonical(chatId));
+    if (
+      messageId &&
+      preferred?.recentKeys.some((key) => key.id === messageId)
+    ) {
+      return this.markRead(preferred.id);
+    }
+    if (messageId) {
+      for (const chat of this.chats.values()) {
+        if (chat.recentKeys.some((key) => key.id === messageId)) {
+          return this.markRead(chat.id);
+        }
+      }
+    }
+    return this.markRead(chatId);
   }
 
   markAllRead() {
@@ -227,7 +374,7 @@ export class UnreadTracker {
   }
 
   recentKeys(chatId) {
-    const chat = this.chats.get(chatId);
+    const chat = this.chats.get(this.canonical(chatId));
     if (!chat) return [];
     return chat.recentKeys
       .filter((key) => key.id)
@@ -238,22 +385,47 @@ export class UnreadTracker {
       }));
   }
 
-  applyContact(id, name) {
-    if (!id || !isCountableChat(id) || !name) return false;
-    this.contactNames.set(id, truncate(String(name).trim(), 120));
-    if (this.contactNames.size > 2000) {
-      const oldest = this.contactNames.keys().next().value;
-      if (oldest) this.contactNames.delete(oldest);
+  applyContact(contactOrId, name) {
+    const contact =
+      typeof contactOrId === 'string'
+        ? { id: contactOrId, name }
+        : contactOrId;
+    if (!contact) return false;
+
+    const ids = [contact.id, contact.phoneNumber, contact.lid].filter(
+      (value) => typeof value === 'string' && isCountableChat(value),
+    );
+    if (!ids.length) return false;
+
+    for (const other of ids.slice(1)) {
+      this.registerAlias(ids[0], other);
     }
-    const chat = this.chats.get(id);
-    if (!chat || chat.name) return false;
-    chat.name = truncate(String(name).trim(), 120);
-    return true;
+
+    const id = this.canonical(ids[0]);
+    const display = contact.name || contact.notify || contact.username;
+    let changed = false;
+
+    if (display) {
+      this.contactNames.set(id, truncate(String(display).trim(), 120));
+      if (this.contactNames.size > 2000) {
+        const oldest = this.contactNames.keys().next().value;
+        if (oldest) this.contactNames.delete(oldest);
+      }
+      const chat = this.chats.get(id);
+      if (chat && !chat.name) {
+        chat.name = truncate(String(display).trim(), 120);
+        changed = true;
+      }
+    }
+    if (contact.username) {
+      this.usernames.set(id, truncate(String(contact.username).trim(), 120));
+    }
+    return changed;
   }
 
   applyGroup(id, subject) {
     if (!id || !isCountableChat(id) || !subject) return false;
-    const chat = this.#ensure(id);
+    const chat = this.#ensure(this.canonical(id));
     chat.isGroup = true;
     if (chat.name === subject) return false;
     chat.name = truncate(String(subject).trim(), 120);
@@ -261,16 +433,22 @@ export class UnreadTracker {
   }
 
   #publicChat(chat, { includeKeys = false } = {}) {
+    const displayName = this.nameFor(chat.id);
+    const name =
+      displayName && (chat.isGroup || !isPhoneLike(displayName))
+        ? displayName
+        : 'unknown';
     const result = {
       id: chat.id,
-      name: chat.name,
+      name,
       is_group: chat.isGroup,
       unread: Math.max(0, chat.unread),
       timestamp: chat.timestamp || 0,
+      read_at: chat.readAt || 0,
       last_message: chat.lastMessage
         ? {
             ...chat.lastMessage,
-            sender_name: chat.lastMessage.sender_name || null,
+            sender_name: chat.lastMessage.sender_name || 'unknown',
           }
         : null,
     };
@@ -306,27 +484,49 @@ export class UnreadTracker {
 
   clear() {
     this.chats.clear();
+    this.contactNames.clear();
+    this.usernames.clear();
+    this.aliases.clear();
   }
 
   toJSON() {
     return {
-      version: 1,
+      version: 2,
       chats: [...this.chats.values()].map((chat) =>
         this.#publicChat(chat, { includeKeys: true }),
       ),
+      aliases: [...this.aliases.entries()],
+      usernames: [...this.usernames.entries()],
     };
   }
 
   load(data) {
     if (!data || !Array.isArray(data.chats)) return;
     this.chats.clear();
+    this.aliases.clear();
+    this.usernames.clear();
+    this.contactNames.clear();
+
+    for (const [id, target] of data.aliases ?? []) {
+      if (typeof id === 'string' && typeof target === 'string') {
+        this.aliases.set(id, target);
+      }
+    }
+    for (const [id, username] of data.usernames ?? []) {
+      if (typeof id === 'string' && typeof username === 'string') {
+        this.usernames.set(this.canonical(id), username);
+      }
+    }
+
     for (const raw of data.chats) {
       if (!raw?.id || !isCountableChat(raw.id)) continue;
-      this.chats.set(raw.id, {
-        id: raw.id,
+      const id = this.canonical(raw.id);
+      this.chats.set(id, {
+        id,
         name: typeof raw.name === 'string' ? raw.name : null,
-        isGroup: raw.is_group ?? isGroupJid(raw.id),
+        isGroup: raw.is_group ?? isGroupJid(id),
         unread: Number.isFinite(raw.unread) ? Math.max(0, raw.unread) : 0,
+        readAt: Number.isFinite(raw.read_at) ? raw.read_at : 0,
         timestamp: Number.isFinite(raw.timestamp) ? raw.timestamp : 0,
         lastMessage: raw.last_message ?? null,
         recentKeys: Array.isArray(raw.recent_keys)

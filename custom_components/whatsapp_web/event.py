@@ -94,10 +94,13 @@ class WhatsAppMessageEvent(EventEntity):
             in {
                 "message_id",
                 "chat_id",
+                "chat_id_alt",
                 "chat_name",
+                "group_name",
                 "is_group",
                 "sender_id",
                 "sender_name",
+                "sender_username",
                 "type",
                 "text",
                 "timestamp",

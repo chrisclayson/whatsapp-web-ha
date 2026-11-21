@@ -8,13 +8,15 @@ from typing import Any
 
 from homeassistant.components.sensor import SensorEntity, SensorStateClass
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from .const import (
     MAX_TEXT_LENGTH,
     STATE_CONNECTED,
     UNREAD_CHAT_LIMIT,
+    messages_signal,
 )
 from .coordinator import WhatsAppCoordinator
 from .entity import WhatsAppEntity
@@ -111,6 +113,7 @@ async def async_setup_entry(
         [
             WhatsAppUnreadSensor(coordinator, entry, identifier),
             WhatsAppLastMessageSensor(coordinator, entry, identifier),
+            WhatsAppRecentMessagesSensor(coordinator, entry, identifier),
         ]
     )
 
@@ -189,11 +192,61 @@ class WhatsAppLastMessageSensor(WhatsAppEntity, SensorEntity):
         return {
             "message_id": message.get("id") or message.get("message_id"),
             "chat_id": message.get("chat_id"),
+            "chat_id_alt": message.get("chat_id_alt"),
             "chat_name": message.get("chat_name"),
+            "group_name": message.get("group_name"),
             "sender_id": message.get("sender_id"),
-            "sender_name": message.get("sender_name"),
+            "sender_name": message.get("sender_name") or "unknown",
+            "sender_username": message.get("sender_username"),
             "type": message.get("type"),
             "from_me": bool(message.get("from_me")),
             "has_media": bool(message.get("has_media")),
             "timestamp": _message_time(message),
+        }
+
+
+class WhatsAppRecentMessagesSensor(WhatsAppEntity, SensorEntity):
+    """Recent received messages, newest first, for the dashboard card.
+
+    Only incoming messages are stored here; outgoing messages are deliberately
+    excluded so a dashboard shows conversations rather than your own replies.
+    """
+
+    _attr_name = "Received messages"
+    _attr_icon = "mdi:message-text"
+
+    def __init__(
+        self,
+        coordinator: WhatsAppCoordinator,
+        entry: ConfigEntry,
+        identifier: str,
+    ) -> None:
+        super().__init__(coordinator, entry)
+        self._attr_unique_id = f"{identifier}_received_messages"
+
+    async def async_added_to_hass(self) -> None:
+        """Update whenever a received message is buffered."""
+        await super().async_added_to_hass()
+        self.async_on_remove(
+            async_dispatcher_connect(
+                self.hass,
+                messages_signal(self.entry.entry_id),
+                self._handle_new_message,
+            )
+        )
+
+    @callback
+    def _handle_new_message(self) -> None:
+        self.async_write_ha_state()
+
+    @property
+    def native_value(self) -> int:
+        return len(self.entry.runtime_data.messages)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        messages = list(reversed(self.entry.runtime_data.messages))
+        return {
+            "count": len(messages),
+            "messages": messages,
         }

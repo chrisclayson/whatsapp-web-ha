@@ -28,6 +28,7 @@ const deps = {
   Browsers: baileys.Browsers,
   DisconnectReason: baileys.DisconnectReason,
   normalizeMessageContent: baileys.normalizeMessageContent,
+  WAMessageStatus: baileys.WAMessageStatus,
 };
 
 const session = new WhatsAppSession({

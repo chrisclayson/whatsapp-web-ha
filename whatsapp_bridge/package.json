@@ -1,6 +1,6 @@
 {
   "name": "whatsapp-web-bridge",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "private": true,
   "type": "module",
   "description": "Local WhatsApp Web (multi-device) bridge for Home Assistant",

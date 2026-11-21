@@ -1,4 +1,4 @@
-import { isGroupJid, toSeconds, truncate } from './util.js';
+import { isGroupJid, isPhoneLike, toSeconds, truncate } from './util.js';
 
 /** Message keys that map to a stable, user-facing type. */
 const TYPE_BY_KEY = {
@@ -187,7 +187,15 @@ function extractLocation(type, node) {
  */
 export function normalizeMessage(
   raw,
-  { meId = null, chatName = null, contentNormalizer = (content) => content } = {},
+  {
+    meId = null,
+    meName = null,
+    chatName = null,
+    contactName = null,
+    contactUsername = null,
+    canonicalChatId = null,
+    contentNormalizer = (content) => content,
+  } = {},
 ) {
   const key = raw?.key;
   if (!key?.remoteJid) return null;
@@ -205,14 +213,44 @@ export function normalizeMessage(
   let type = detectType(content);
   if (content.audioMessage?.ptt) type = 'voice';
 
+  const rawChatId = key.remoteJid;
+  const chatId = canonicalChatId ?? rawChatId;
+  const chatIdAlt = rawChatId !== chatId ? rawChatId : key.remoteJidAlt ?? null;
+  const isGroup = isGroupJid(chatId);
+  const senderId =
+    key.participant ??
+    key.participantAlt ??
+    (key.fromMe ? meId ?? rawChatId : rawChatId);
+  const senderUsername =
+    key.participantUsername ??
+    key.remoteJidUsername ??
+    contactUsername ??
+    null;
+  const cleanName = (value) => {
+    if (!value) return null;
+    const text = String(value).trim();
+    return text && !isPhoneLike(text) ? text : null;
+  };
+  const senderName =
+    cleanName(raw.pushName) ||
+    cleanName(key.fromMe ? meName : contactName) ||
+    senderUsername ||
+    'unknown';
+  const resolvedChatName = isGroup
+    ? chatName || 'unknown'
+    : cleanName(chatName) || senderName;
+
   if (type === 'protocol') {
     return {
       messageId: key.id ?? null,
-      chatId: key.remoteJid,
-      chatName,
-      isGroup: isGroupJid(key.remoteJid),
-      senderId: key.participant ?? (key.fromMe ? meId : key.remoteJid),
-      senderName: raw.pushName ?? null,
+      chatId,
+      chatIdAlt,
+      chatName: resolvedChatName,
+      groupName: isGroup ? resolvedChatName : null,
+      isGroup,
+      senderId,
+      senderName,
+      senderUsername,
       fromMe: Boolean(key.fromMe),
       type,
       text: '',
@@ -235,18 +273,16 @@ export function normalizeMessage(
     content.videoMessage?.contextInfo ??
     null;
 
-  const senderId =
-    key.participant ??
-    key.participantAlt ??
-    (key.fromMe ? meId ?? key.remoteJid : key.remoteJid);
-
   return {
     messageId: key.id ?? null,
-    chatId: key.remoteJid,
-    chatName,
-    isGroup: isGroupJid(key.remoteJid),
+    chatId,
+    chatIdAlt,
+    chatName: resolvedChatName,
+    groupName: isGroup ? resolvedChatName : null,
+    isGroup,
     senderId,
-    senderName: raw.pushName ?? null,
+    senderName,
+    senderUsername,
     fromMe: Boolean(key.fromMe),
     type,
     text: truncate(String(extractText(content, type, node) ?? ''), 4000),
@@ -268,13 +304,18 @@ export function toPublicMessage(
   message,
   { chatName = null, receivedAt = null, unreadTotal = null } = {},
 ) {
+  const resolvedChatName =
+    chatName ?? message.chatName ?? (message.isGroup ? 'unknown' : message.senderName);
   return {
     message_id: message.messageId,
     chat_id: message.chatId,
-    chat_name: chatName ?? message.chatName ?? null,
+    chat_id_alt: message.chatIdAlt ?? null,
+    chat_name: resolvedChatName || 'unknown',
+    group_name: message.isGroup ? resolvedChatName || 'unknown' : null,
     is_group: message.isGroup,
     sender_id: message.senderId,
-    sender_name: message.senderName,
+    sender_name: message.senderName || 'unknown',
+    sender_username: message.senderUsername ?? null,
     from_me: message.fromMe,
     type: message.type,
     text: message.text,

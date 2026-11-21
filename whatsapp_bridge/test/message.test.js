@@ -147,3 +147,72 @@ test('keeps reaction text and quoted metadata', () => {
   assert.equal(message.type, 'reaction');
   assert.equal(message.text, '👍');
 });
+
+test('never falls back to a phone number for sender or chat name', () => {
+  const message = normalizeMessage(
+    {
+      key: { remoteJid: ALICE, fromMe: false, id: 'm7' },
+      message: { conversation: 'hello' },
+      messageTimestamp: 1700000007,
+    },
+    { meId: ME },
+  );
+  const publicMessage = toPublicMessage(message);
+
+  assert.equal(message.senderName, 'unknown');
+  assert.equal(publicMessage.sender_name, 'unknown');
+  assert.equal(publicMessage.chat_name, 'unknown');
+  assert.equal(publicMessage.group_name, null);
+});
+
+test('carries group and sender names independently', () => {
+  const message = normalizeMessage(
+    {
+      key: { remoteJid: GROUP, fromMe: false, id: 'm8', participant: ALICE },
+      message: { conversation: 'hi' },
+      messageTimestamp: 1700000008,
+    },
+    {
+      meId: ME,
+      chatName: 'Family',
+      contactName: 'Alice',
+      contactUsername: 'alice.w',
+    },
+  );
+  const publicMessage = toPublicMessage(message);
+
+  assert.equal(publicMessage.group_name, 'Family');
+  assert.equal(publicMessage.chat_name, 'Family');
+  assert.equal(publicMessage.sender_name, 'Alice');
+  assert.equal(publicMessage.sender_username, 'alice.w');
+});
+
+test('uses the canonical PN chat id and keeps the LID as alt', () => {
+  const lid = '999999999999999@lid';
+  const message = normalizeMessage(
+    {
+      key: { remoteJid: lid, remoteJidAlt: ALICE, fromMe: false, id: 'm9' },
+      message: { conversation: 'hello' },
+      messageTimestamp: 1700000009,
+    },
+    { meId: ME, canonicalChatId: ALICE },
+  );
+  const publicMessage = toPublicMessage(message);
+
+  assert.equal(publicMessage.chat_id, ALICE);
+  assert.equal(publicMessage.chat_id_alt, lid);
+});
+
+test('treats a phone-number push name as unavailable', () => {
+  const message = normalizeMessage(
+    {
+      key: { remoteJid: ALICE, fromMe: false, id: 'm10' },
+      message: { conversation: 'hello' },
+      messageTimestamp: 1700000010,
+      pushName: '15551234567',
+    },
+    { meId: ME },
+  );
+  assert.equal(message.senderName, 'unknown');
+  assert.equal(toPublicMessage(message).chat_name, 'unknown');
+});

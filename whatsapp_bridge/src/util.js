@@ -89,6 +89,11 @@ export function safeEqual(a, b) {
   return timingSafeEqual(left, right);
 }
 
+export function isPhoneLike(value) {
+  const text = String(value ?? '').trim();
+  return /^\+?\d[\d\s().-]{5,}$/.test(text);
+}
+
 export function formatPairingCode(code) {
   const clean = String(code ?? '').replace(/[^A-Za-z0-9]/g, '').toUpperCase();
   if (clean.length === 8) return `${clean.slice(0, 4)}-${clean.slice(4)}`;

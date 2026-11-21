@@ -33,8 +33,17 @@ ATTR_STATE = "state"
 
 UNREAD_CHAT_LIMIT = 20
 MAX_TEXT_LENGTH = 255
+RECENT_MESSAGE_LIMIT = 20
+RECENT_MESSAGE_TEXT_LIMIT = 300
+
+CARD_URL = f"/{DOMAIN}/whatsapp-messages-card.js"
 
 
 def message_signal(entry_id: str) -> str:
     """Return the dispatcher signal used for message events of an entry."""
     return f"{DOMAIN}_message_{entry_id}"
+
+
+def messages_signal(entry_id: str) -> str:
+    """Return the dispatcher signal used for the recent-message buffer."""
+    return f"{DOMAIN}_messages_{entry_id}"

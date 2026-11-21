@@ -36,6 +36,8 @@ STATE = {
 }
 
 MESSAGE = {
+    "sender_username": None,
+    "group_name": None,
     "message_id": "m1",
     "chat_id": "15550001111@s.whatsapp.net",
     "chat_name": "Alice",
@@ -53,10 +55,22 @@ MESSAGE = {
     "quoted_message_id": None,
     "is_forwarded": False,
     "received_at": "2026-11-20T12:00:01+00:00",
+    "unread_total": 2,
+}
+
+OUTGOING = {
+    **MESSAGE,
+    "message_id": "m2",
+    "sender_name": "Me",
+    "from_me": True,
+    "text": "my reply",
+    "timestamp": 1700000002,
 }
 
 
-async def _setup_entry(hass: HomeAssistant, monkeypatch) -> MockConfigEntry:
+async def _setup_entry(
+    hass: HomeAssistant, monkeypatch, extra_frames=()
+) -> MockConfigEntry:
     async def fake_get_state(self):
         return STATE
 
@@ -78,6 +92,8 @@ async def _setup_entry(hass: HomeAssistant, monkeypatch) -> MockConfigEntry:
             },
         }
         yield {"type": "message", "data": MESSAGE}
+        for frame in extra_frames:
+            yield frame
         await asyncio.Event().wait()
 
     monkeypatch.setattr(BridgeClient, "get_state", fake_get_state)
@@ -128,9 +144,17 @@ async def test_entities_and_events(hass: HomeAssistant, monkeypatch) -> None:
     assert last_message.state == "hello from Alice"
     assert last_message.attributes["chat_name"] == "Alice"
 
+    received = _state_for(hass, "sensor", "_received_messages")
+    assert received.state == "1"
+    assert len(received.attributes["messages"]) == 1
+    assert received.attributes["messages"][0]["text"] == "hello from Alice"
+    assert received.attributes["messages"][0]["from_me"] is False
+
     message_event = _state_for(hass, "event", "_message")
     assert message_event.attributes["event_type"] == "message_received"
     assert message_event.attributes["text"] == "hello from Alice"
+    assert message_event.attributes["sender_name"] == "Alice"
+    assert message_event.attributes["group_name"] is None
 
     assert len(events) == 1
     assert events[0]["text"] == "hello from Alice"
@@ -196,5 +220,39 @@ async def test_disconnected_state(
     assert connected.state == STATE_OFF
     assert connected.attributes["status"] == "disconnected"
 
+    await hass.config_entries.async_unload(entry.entry_id)
+    await hass.async_block_till_done()
+
+
+async def test_received_buffer_excludes_outgoing(
+    hass: HomeAssistant, monkeypatch
+) -> None:
+    events = []
+
+    def record(event):
+        events.append(event.data)
+
+    unsub = hass.bus.async_listen(EVENT_MESSAGE, record)
+    entry = await _setup_entry(
+        hass,
+        monkeypatch,
+        extra_frames=({"type": "message", "data": OUTGOING},),
+    )
+
+    # Prove the outgoing frame was processed before checking the buffer.
+    last_message = _state_for(hass, "sensor", "_last_message")
+    assert last_message.state == "my reply"
+
+    received = _state_for(hass, "sensor", "_received_messages")
+    assert received.state == "1"
+    assert [m["text"] for m in received.attributes["messages"]] == [
+        "hello from Alice"
+    ]
+    assert all(not m["from_me"] for m in received.attributes["messages"])
+
+    # Outgoing events stay off by default.
+    assert [event["text"] for event in events] == ["hello from Alice"]
+
+    unsub()
     await hass.config_entries.async_unload(entry.entry_id)
     await hass.async_block_till_done()

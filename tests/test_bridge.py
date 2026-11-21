@@ -171,6 +171,8 @@ def test_event_payload_normalization():
     assert payload["media"] is None
     assert payload["mentions"] == ["15550000000@s.whatsapp.net"]
     assert payload["unread_total"] is None
+    assert payload["sender_username"] is None
+    assert payload["group_name"] is None
 
 
 def test_event_payload_handles_missing_values():
@@ -179,4 +181,60 @@ def test_event_payload_handles_missing_values():
     assert payload["type"] == "unknown"
     assert payload["timestamp"] is None
     assert payload["media"] is None
+    assert payload["sender_name"] == "unknown"
+    assert payload["chat_name"] == "unknown"
+    assert payload["group_name"] is None
     json.dumps(payload)  # must be JSON serializable for the event bus
+
+
+def test_event_payload_falls_back_to_unknown_names():
+    payload = build_message_payload(
+        "entry-1",
+        "instance-1",
+        {
+            "chat_id": "120363000000000000@g.us",
+            "is_group": True,
+            "sender_name": None,
+            "group_name": None,
+            "text": "hello",
+        },
+    )
+    assert payload["sender_name"] == "unknown"
+    assert payload["group_name"] == "unknown"
+    assert payload["chat_name"] == "unknown"
+
+
+def test_event_payload_keeps_group_and_username():
+    payload = build_message_payload(
+        "entry-1",
+        "instance-1",
+        {
+            "chat_id": "120363000000000000@g.us",
+            "chat_id_alt": None,
+            "chat_name": "Family",
+            "group_name": "Family",
+            "is_group": True,
+            "sender_id": "15551234567@s.whatsapp.net",
+            "sender_name": "Alice",
+            "sender_username": "alice.w",
+            "text": "hi",
+        },
+    )
+    assert payload["group_name"] == "Family"
+    assert payload["sender_name"] == "Alice"
+    assert payload["sender_username"] == "alice.w"
+
+
+def test_event_payload_never_uses_a_phone_number_as_a_name():
+    payload = build_message_payload(
+        "entry-1",
+        "instance-1",
+        {
+            "chat_id": "15551234567@s.whatsapp.net",
+            "chat_name": "+15551234567",
+            "sender_name": "15551234567",
+            "is_group": False,
+        },
+    )
+    assert payload["sender_name"] == "unknown"
+    assert payload["chat_name"] == "unknown"

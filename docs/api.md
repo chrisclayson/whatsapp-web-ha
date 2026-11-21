@@ -256,7 +256,7 @@ Returns up to 500 known chats, newest activity first.
 ## `GET /api/version`
 
 ```json
-{ "version": "1.0.0", "instance_id": "3f2c…" }
+{ "version": "1.0.2", "instance_id": "3f2c…" }
 ```
 
 ---
@@ -279,8 +279,23 @@ Subsequent frames use the same envelope:
 | `unread` | `{ total, chats: [{ id, name, is_group, unread, timestamp }] }` |
 | `message` | The message payload documented in the README |
 
+Message frames include `chat_id`, `chat_id_alt`, `chat_name`, `group_name`,
+`sender_id`, `sender_name` and `sender_username`. Display names come from push
+names, contacts and group metadata. If a name or username is unavailable, the
+field is the literal string `unknown`; phone numbers are never used as display
+names. `group_name` is `null` for direct chats and `unknown` for a group whose
+subject is not known yet. `chat_id_alt` is the alternate LID/PN identifier when
+WhatsApp uses both for the same conversation.
+
+Unread chats also report `name: "unknown"` rather than a phone number when no
+display name is known.
+
 Clients may send `{ "type": "ping" }` and receive `{ "type": "pong" }`. Protocol
 pings are sent every 30 seconds; a client that misses one is disconnected.
+
+Read state from the phone or another linked device is applied through WhatsApp
+read receipts and app-state sync. LID and PN identifiers are aliased, so a read
+under either identifier clears the same chat.
 
 Reconnect with backoff and refetch `GET /api/state` after reconnecting. The
 stream has no replay buffer; `hello` is the resync point.

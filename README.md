@@ -18,7 +18,12 @@ use incoming messages in automations.
 - **Messages as events**: a `whatsapp_web_message` bus event and an `event`
   entity for the automation trigger editor.
 - **Unread counter**: a `sensor` with the total unread count and a per-chat
-  breakdown, reset when a chat is read on any linked device.
+  breakdown, reset when a chat is read on any linked device (read receipts and
+  app-state sync, including LID/PN aliases).
+- **Human names**: sender, chat and group names from push names, contacts and
+  group metadata; falls back to `unknown`, never a phone number.
+- **Messages card**: a bundled dashboard card showing recent received messages
+  only — your replies are excluded.
 - **Services** to send a text, mark a chat read, and send a typing indicator.
 - **Persistent session**: pair once, keep the session across restarts.
 
@@ -166,6 +171,7 @@ You can also choose **Finish setup and pair later**, then use the integration's
 | --- | --- | --- |
 | `sensor.<account>_unread_messages` | `sensor.alice_unread_messages` | Total unread count. Attributes: `chats`, `connected`, `account`, `last_message`, `last_message_at`, `last_message_chat` |
 | `sensor.<account>_last_message` | `sensor.alice_last_message` | Text of the most recent message, with chat and sender attributes |
+| `sensor.<account>_received_messages` | `sensor.alice_received_messages` | Last 20 **received** messages (incoming only) for the dashboard card. Attributes: `messages`, `count` |
 | `binary_sensor.<account>_connection` | `binary_sensor.alice_connection` | `on` while the bridge is connected to WhatsApp |
 | `event.<account>_message` | `event.alice_message` | Fires `message_received` / `message_sent` for the trigger editor |
 
@@ -198,10 +204,13 @@ event_data:
   instance_id: 3f2c...
   message_id: 3EB0C767D097
   chat_id: 15551234567@s.whatsapp.net
+  chat_id_alt: null
   chat_name: Alice
+  group_name: null
   is_group: false
   sender_id: 15551234567@s.whatsapp.net
   sender_name: Alice
+  sender_username: alice.w
   from_me: false
   type: text            # text, image, video, audio, voice, document,
                         # sticker, location, contact, poll, reaction, ...
@@ -223,6 +232,13 @@ you send through Home Assistant are also covered by that option.
 
 History messages and messages received while the bridge was offline are **not**
 replayed as events.
+
+`chat_name`, `group_name` and `sender_name` are resolved from your contacts,
+the WhatsApp profile push name, and group metadata. If a name or username is
+not available, the field is the literal string `unknown` — phone numbers are
+never used as display names. `group_name` is only set for groups, and
+`chat_id_alt` carries the alternate LID/PN identifier when WhatsApp uses both
+for the same conversation.
 
 ### Trigger from the event entity
 
@@ -256,8 +272,9 @@ A full set of examples is in [docs/automations.md](docs/automations.md).
   usually included. It never lowers a count that was already tracked live.
 - New incoming messages increment the count once per message ID.
 - Reading a chat on **any** linked device resets that chat to zero through
-  WhatsApp's app-state sync. The same happens when you call
-  `whatsapp_web.mark_read`.
+  WhatsApp read receipts plus app-state sync. LID and phone-number JIDs for the
+  same conversation are aliased, so a read under either identifier clears the
+  same chat. The same happens when you call `whatsapp_web.mark_read`.
 - Outgoing messages, reactions, protocol messages, status updates and
   newsletters are not counted.
 - Events are only emitted for live messages. Messages that arrived while the
@@ -267,6 +284,36 @@ A full set of examples is in [docs/automations.md](docs/automations.md).
 
 This is deliberately a *per-linked-device* count, matching how WhatsApp Web
 shows unread state. It is not a full server-side mailbox mirror.
+
+---
+
+## Messages card
+
+The integration ships a dashboard card that lists **received** messages only.
+Replies you send from the phone or through Home Assistant are filtered out.
+
+```yaml
+type: custom:whatsapp-messages-card
+entity: sensor.alice_received_messages
+title: WhatsApp
+max_messages: 20
+show_group: true
+show_time: true
+show_avatar: true
+```
+
+- `entity` is required; use the **Received messages** sensor for the account.
+- `max_messages` defaults to 20.
+- `show_group` prefixes group messages with the group name and sender.
+- `show_time` shows a time for today and a date for older messages.
+- `show_avatar` shows initials in a green circle for groups and a blue circle
+  for direct messages.
+
+The card is registered automatically as a frontend module when Home Assistant
+starts. If it does not appear in the card picker, add
+`/whatsapp_web/whatsapp-messages-card.js` under **Settings → Dashboards →
+Resources** as a **JavaScript module**. The sensor stores the buffer in Home
+Assistant storage, so the card survives restarts.
 
 ---
 
@@ -334,6 +381,8 @@ bridge per account.
 | No events but the sensor updates | Check the integration option for outgoing events and the `from_me` field. Only live messages fire events. |
 | Sensor unavailable | The bridge is unreachable; the integration marks entities unavailable until the poll/WebSocket reconnects. |
 | Add-on build fails with `npm: not found` | Update the add-on and rebuild. The current Dockerfile uses `node:24-alpine` directly instead of the Supervisor-supplied Home Assistant base image. |
+| Messages card is missing | Add `/whatsapp_web/whatsapp-messages-card.js` as a JavaScript module under **Settings → Dashboards → Resources**. |
+| Card is empty | Check `sensor.<account>_received_messages`; only newly received messages are buffered (up to 20), and outgoing messages are excluded by design. |
 
 Bridge logs are in **Settings → Add-ons → WhatsApp Web Bridge → Log** or
 `docker logs whatsapp-bridge`.

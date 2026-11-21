@@ -103,6 +103,7 @@ async function createHarness() {
       restartRequired: 515,
     },
     normalizeMessageContent: (content) => content,
+    WAMessageStatus: { READ: 4 },
   };
 
   const session = new WhatsAppSession({
@@ -289,4 +290,107 @@ test('logout clears auth, chats and the session status', async () => {
     fsp.access(path.join(dir, 'auth', 'creds.json')),
     /ENOENT/,
   );
+});
+
+async function connectHarness() {
+  const harness = await createHarness();
+  const starting = harness.session.start({ method: 'qr', timeoutMs: 1000 });
+  await waitFor(() => harness.sockets.length === 1);
+  harness.sockets[0].ev.emit('connection.update', { qr: 'raw' });
+  await starting;
+  harness.sockets[0].ev.emit('connection.update', { connection: 'open' });
+  await waitFor(() => harness.session.status === 'connected');
+  return harness;
+}
+
+test('read receipts from another device clear the unread badge', async () => {
+  const { session, sockets } = await connectHarness();
+
+  sockets[0].ev.emit('chats.upsert', [
+    { id: ALICE, name: 'Alice', unreadCount: 2 },
+  ]);
+  await waitFor(() => session.tracker.total() === 2);
+
+  sockets[0].ev.emit('messages.update', [
+    {
+      key: { remoteJid: ALICE, fromMe: false, id: 'm1' },
+      update: { status: 4 },
+    },
+  ]);
+  await waitFor(() => session.tracker.total() === 0);
+
+  await session.close();
+});
+
+test('read receipts work across LID and PN aliases', async () => {
+  const lid = '999999999999999@lid';
+  const { session, sockets } = await connectHarness();
+
+  sockets[0].ev.emit('lid-mapping.update', { lid, pn: ALICE });
+  sockets[0].ev.emit('chats.upsert', [{ id: lid, unreadCount: 3 }]);
+  await waitFor(() => session.tracker.total() === 3);
+  assert.equal(session.getChats()[0].id, ALICE);
+
+  sockets[0].ev.emit('messages.update', [
+    {
+      key: { remoteJid: ALICE, fromMe: false, id: 'm1' },
+      update: { status: 4 },
+    },
+  ]);
+  await waitFor(() => session.tracker.total() === 0);
+
+  await session.close();
+});
+
+test('events carry contact and group names', async () => {
+  const { session, sockets, events } = await connectHarness();
+  const group = '120363000000000000@g.us';
+
+  sockets[0].ev.emit('contacts.upsert', [
+    { id: ALICE, name: 'Alice', username: 'alice.w' },
+  ]);
+  sockets[0].ev.emit('groups.upsert', [{ id: group, subject: 'Family' }]);
+  sockets[0].ev.emit('messages.upsert', {
+    type: 'notify',
+    messages: [
+      {
+        key: { remoteJid: group, fromMe: false, id: 'g1', participant: ALICE },
+        message: { conversation: 'hi all' },
+        messageTimestamp: 1700000020,
+      },
+    ],
+  });
+
+  await waitFor(() => events.some((event) => event.type === 'message'));
+  const message = events.find((event) => event.type === 'message').data;
+  assert.equal(message.sender_name, 'Alice');
+  assert.equal(message.sender_username, 'alice.w');
+  assert.equal(message.group_name, 'Family');
+  assert.equal(message.chat_name, 'Family');
+
+  await session.close();
+});
+
+test('unknown senders and chats are labelled unknown', async () => {
+  const { session, sockets, events } = await connectHarness();
+  const stranger = '15550009999@s.whatsapp.net';
+
+  sockets[0].ev.emit('messages.upsert', {
+    type: 'notify',
+    messages: [
+      {
+        key: { remoteJid: stranger, fromMe: false, id: 'u1' },
+        message: { conversation: 'who am i' },
+        messageTimestamp: 1700000021,
+      },
+    ],
+  });
+
+  await waitFor(() => events.some((event) => event.type === 'message'));
+  const message = events.find((event) => event.type === 'message').data;
+  assert.equal(message.sender_name, 'unknown');
+  assert.equal(message.chat_name, 'unknown');
+  assert.equal(message.group_name, null);
+
+  await session.close();
 });

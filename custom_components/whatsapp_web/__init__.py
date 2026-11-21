@@ -5,14 +5,21 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
+from homeassistant.components.frontend import (
+    DATA_EXTRA_MODULE_URL,
+    add_extra_js_url,
+)
+from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.dispatcher import async_dispatcher_send
+from homeassistant.helpers.storage import Store
 
 from .bridge import (
     BridgeAuthError,
@@ -21,6 +28,7 @@ from .bridge import (
     BridgeError,
 )
 from .const import (
+    CARD_URL,
     CONF_FIRE_OUTGOING_EVENTS,
     CONF_POLL_INTERVAL,
     CONF_TOKEN,
@@ -28,7 +36,10 @@ from .const import (
     DEFAULT_POLL_INTERVAL,
     DOMAIN,
     EVENT_MESSAGE,
+    RECENT_MESSAGE_LIMIT,
+    RECENT_MESSAGE_TEXT_LIMIT,
     message_signal,
+    messages_signal,
 )
 from .coordinator import WhatsAppCoordinator
 from .events import build_message_payload
@@ -51,6 +62,8 @@ class WhatsAppRuntime:
     coordinator: WhatsAppCoordinator
     listener: asyncio.Task[None] | None = None
     unread_chats: list[dict[str, Any]] = field(default_factory=list)
+    messages: list[dict[str, Any]] = field(default_factory=list)
+    store: Store | None = None
 
 
 async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:
@@ -87,8 +100,21 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     runtime.unread_chats = [
         chat for chat in state.get("chats", []) if int(chat.get("unread") or 0) > 0
     ]
-    entry.runtime_data = runtime
 
+    store = Store(hass, 1, f"{DOMAIN}.{entry.entry_id}.messages")
+    try:
+        saved = await store.async_load()
+    except Exception:
+        _LOGGER.exception("Could not load the WhatsApp message buffer")
+        saved = None
+    if isinstance(saved, list):
+        runtime.messages = [
+            item for item in saved if isinstance(item, dict)
+        ][-RECENT_MESSAGE_LIMIT:]
+    runtime.store = store
+
+    entry.runtime_data = runtime
+    await _async_register_frontend(hass)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     runtime.listener = entry.async_create_background_task(
         hass,
@@ -108,6 +134,11 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             await runtime.listener
         except asyncio.CancelledError:
             pass
+    if runtime and runtime.store:
+        try:
+            await runtime.store.async_save(list(runtime.messages))
+        except Exception:
+            _LOGGER.exception("Could not save the WhatsApp message buffer")
     return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
 
 
@@ -200,6 +231,13 @@ def _handle_frame(
         state["last_message"] = payload
         coordinator.async_set_updated_data(state)
 
+        if not payload["from_me"] and _remember_message(runtime, payload):
+            if runtime.store is not None:
+                runtime.store.async_delay_save(
+                    lambda: list(runtime.messages), 2
+                )
+            async_dispatcher_send(hass, messages_signal(entry.entry_id))
+
         if payload["from_me"] and not entry.options.get(
             CONF_FIRE_OUTGOING_EVENTS, False
         ):
@@ -212,3 +250,66 @@ def _handle_frame(
         return
 
     _LOGGER.debug("Ignoring unknown bridge frame type %s", frame_type)
+
+
+def _remember_message(
+    runtime: WhatsAppRuntime, payload: dict[str, Any]
+) -> bool:
+    """Add a received message to the bounded dashboard buffer."""
+    item = {
+        "message_id": payload.get("message_id"),
+        "chat_id": payload.get("chat_id"),
+        "chat_id_alt": payload.get("chat_id_alt"),
+        "chat_name": payload.get("chat_name"),
+        "group_name": payload.get("group_name"),
+        "sender_name": payload.get("sender_name") or "unknown",
+        "sender_username": payload.get("sender_username"),
+        "is_group": bool(payload.get("is_group")),
+        "text": str(payload.get("text") or "")[:RECENT_MESSAGE_TEXT_LIMIT],
+        "type": payload.get("type") or "unknown",
+        "timestamp": payload.get("timestamp"),
+        "timestamp_epoch": payload.get("timestamp_epoch"),
+        "has_media": bool(payload.get("has_media")),
+        "from_me": False,
+    }
+
+    key = (item["chat_id"], item["message_id"])
+    if item["message_id"] and any(
+        (existing.get("chat_id"), existing.get("message_id")) == key
+        for existing in runtime.messages[-10:]
+    ):
+        return False
+
+    runtime.messages.append(item)
+    if len(runtime.messages) > RECENT_MESSAGE_LIMIT:
+        del runtime.messages[:-RECENT_MESSAGE_LIMIT]
+    return True
+
+
+async def _async_register_frontend(hass: HomeAssistant) -> None:
+    """Serve and load the custom messages card once."""
+    key = f"{DOMAIN}_frontend_registered"
+    if hass.data.get(key):
+        return
+
+    http = getattr(hass, "http", None)
+    if http is None or DATA_EXTRA_MODULE_URL not in hass.data:
+        _LOGGER.debug("Frontend is not ready; skipping messages card")
+        return
+
+    try:
+        await http.async_register_static_paths(
+            [
+                StaticPathConfig(
+                    f"/{DOMAIN}",
+                    str(Path(__file__).parent / "www"),
+                    False,
+                )
+            ]
+        )
+        add_extra_js_url(hass, CARD_URL)
+    except Exception:
+        _LOGGER.exception("Could not register the WhatsApp messages card")
+        return
+
+    hass.data[key] = True

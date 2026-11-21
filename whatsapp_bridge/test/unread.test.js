@@ -21,7 +21,7 @@ test('seeds unread values from history and chat upserts', () => {
     chats: [
       {
         id: ALICE,
-        name: null,
+        name: 'unknown',
         is_group: false,
         unread: 3,
         timestamp: 100,
@@ -191,4 +191,91 @@ test('group and contact names are applied', () => {
   tracker.applyContact(ALICE, 'Alice');
   assert.equal(tracker.nameFor(GROUP), 'Family');
   assert.equal(tracker.nameFor(ALICE), 'Alice');
+});
+
+test('collapses LID and PN aliases for unread and read state', () => {
+  const lid = '999999999999999@lid';
+  const tracker = new UnreadTracker();
+
+  tracker.noteMessage(
+    {
+      chatId: lid,
+      messageId: 'm1',
+      text: 'hello',
+      type: 'text',
+      timestamp: 10,
+      fromMe: false,
+      senderId: lid,
+      senderName: 'Alice',
+      isGroup: false,
+    },
+    { countUnread: true },
+  );
+  assert.equal(tracker.total(), 1);
+  assert.equal(tracker.snapshot()[0].id, lid);
+
+  tracker.registerAlias(lid, ALICE);
+  assert.equal(tracker.total(), 1);
+  assert.equal(tracker.snapshot()[0].id, ALICE);
+  assert.equal(tracker.nameFor(lid), 'Alice');
+
+  tracker.markRead(lid);
+  assert.equal(tracker.total(), 0);
+});
+
+test('uses a contact username when no display name exists', () => {
+  const tracker = new UnreadTracker();
+  tracker.applyContact({
+    id: ALICE,
+    username: 'alice.w',
+  });
+  assert.equal(tracker.nameFor(ALICE), 'alice.w');
+  assert.equal(tracker.usernameFor(ALICE), 'alice.w');
+});
+
+test('a read receipt can clear a chat by message id without an alias', () => {
+  const lid = '999999999999999@lid';
+  const tracker = new UnreadTracker();
+
+  tracker.noteMessage(
+    {
+      chatId: lid,
+      messageId: 'm-alias',
+      text: 'hello',
+      type: 'text',
+      timestamp: 10,
+      fromMe: false,
+      isGroup: false,
+    },
+    { countUnread: true },
+  );
+  assert.equal(tracker.total(), 1);
+
+  // The read receipt arrives under a different JID before the alias is known.
+  tracker.markReadByMessageId('m-alias', ALICE);
+  assert.equal(tracker.total(), 0);
+});
+
+test('a newer read on one alias wins when aliases merge', () => {
+  const lid = '999999999999999@lid';
+  const tracker = new UnreadTracker();
+
+  // Unread chat stored under the phone-number JID.
+  tracker.applyChat({ id: ALICE, unreadCount: 3 }, { seed: true });
+  tracker.noteMessage({
+    chatId: ALICE,
+    messageId: 'old-1',
+    text: 'old message',
+    type: 'text',
+    timestamp: 100,
+    fromMe: false,
+    isGroup: false,
+  });
+
+  // The phone reads the same conversation under the LID before the alias is
+  // known to the bridge.
+  tracker.applyChat({ id: lid, unreadCount: 0 });
+
+  tracker.registerAlias(lid, ALICE);
+  assert.equal(tracker.total(), 0);
 });

@@ -294,9 +294,13 @@ export class WhatsAppSession {
       });
     }
 
+    this.tracker.registerAliasesFromKey(sent?.key);
     const message = normalizeMessage(sent, {
       meId: this.me?.id,
+      meName: this.me?.name,
       chatName: this.tracker.nameFor(jid),
+      contactName: this.me?.name,
+      canonicalChatId: this.tracker.canonical(jid),
       contentNormalizer: this.deps.normalizeMessageContent,
     });
     if (message) {
@@ -304,7 +308,6 @@ export class WhatsAppSession {
       this.emit(
         'message',
         toPublicMessage(message, {
-          chatName: this.tracker.nameFor(message.chatId),
           receivedAt: new Date().toISOString(),
           unreadTotal: this.tracker.total(),
         }),
@@ -495,6 +498,14 @@ export class WhatsAppSession {
     sock.ev.on(
       'messages.upsert',
       guard((payload) => this.#handleMessagesUpsert(payload)),
+    );
+    sock.ev.on(
+      'messages.update',
+      guard((updates) => this.#handleMessagesUpdate(updates)),
+    );
+    sock.ev.on(
+      'lid-mapping.update',
+      guard((mapping) => this.#handleLidMapping(mapping)),
     );
     sock.ev.on(
       'chats.upsert',
@@ -702,10 +713,17 @@ export class WhatsAppSession {
 
     for (const raw of messages) {
       if (!raw?.key?.remoteJid) continue;
-      const chatName = this.tracker.nameFor(raw.key.remoteJid);
+      this.tracker.registerAliasesFromKey(raw.key);
+      const canonicalChatId = this.tracker.canonical(raw.key.remoteJid);
+      const senderId =
+        raw.key.participant ?? raw.key.participantAlt ?? raw.key.remoteJid;
       const message = normalizeMessage(raw, {
         meId: this.me?.id,
-        chatName,
+        meName: this.me?.name,
+        chatName: this.tracker.nameFor(canonicalChatId),
+        contactName: this.tracker.nameFor(senderId),
+        contactUsername: this.tracker.usernameFor(senderId),
+        canonicalChatId,
         contentNormalizer: this.deps.normalizeMessageContent,
       });
       if (!message) continue;
@@ -719,8 +737,6 @@ export class WhatsAppSession {
         this.emit(
           'message',
           toPublicMessage(message, {
-            chatName:
-              this.tracker.nameFor(message.chatId) ?? message.chatName ?? null,
             receivedAt: new Date().toISOString(),
             unreadTotal: this.tracker.total(),
           }),
@@ -741,6 +757,32 @@ export class WhatsAppSession {
     return true;
   }
 
+  #handleLidMapping(mapping) {
+    if (!mapping?.lid || !mapping?.pn) return;
+    this.tracker.registerAlias(mapping.lid, mapping.pn);
+    this.#scheduleUnread();
+    this.#persist();
+  }
+
+  #handleMessagesUpdate(updates) {
+    if (!Array.isArray(updates)) return;
+    const readStatus = this.deps.WAMessageStatus?.READ ?? 4;
+    let changed = false;
+    for (const item of updates) {
+      const key = item?.key;
+      if (!key?.remoteJid || key.fromMe) continue;
+      if (item.update?.status !== readStatus) continue;
+      this.tracker.registerAliasesFromKey(key);
+      if (this.tracker.markReadByMessageId(key.id, key.remoteJid)) {
+        changed = true;
+      }
+    }
+    if (changed) {
+      this.emitUnreadNow();
+      this.#persist();
+    }
+  }
+
   #handleChats(chats, { seed }) {
     if (!Array.isArray(chats)) return;
     let changed = false;
@@ -758,14 +800,13 @@ export class WhatsAppSession {
     let changed = false;
     for (const contact of contacts) {
       if (!contact?.id) continue;
-      if (this.tracker.applyContact(contact.id, contact.name ?? contact.notify)) {
-        changed = true;
-      }
+      if (this.tracker.applyContact(contact)) changed = true;
     }
-    if (changed) {
-      this.#scheduleUnread();
-      this.#persist();
-    }
+    // Registering a contact can merge LID/PN chat state, so refresh even when
+    // only the display name changed.
+    this.#scheduleUnread();
+    this.#persist();
+    return changed;
   }
 
   #handleGroups(groups) {
@@ -783,15 +824,18 @@ export class WhatsAppSession {
   }
 
   #handleHistory(payload) {
-    const { chats = [], contacts = [] } = payload ?? {};
+    const { chats = [], contacts = [], lidPnMappings = [] } = payload ?? {};
     let changed = false;
+    for (const mapping of lidPnMappings) {
+      if (mapping?.lid && mapping?.pn) {
+        this.tracker.registerAlias(mapping.lid, mapping.pn);
+      }
+    }
     for (const chat of chats) {
       if (this.tracker.applyChat(chat, { seed: true })) changed = true;
     }
     for (const contact of contacts) {
-      if (contact?.id && this.tracker.applyContact(contact.id, contact.name)) {
-        changed = true;
-      }
+      if (contact?.id && this.tracker.applyContact(contact)) changed = true;
     }
     if (changed) {
       this.#scheduleUnread();
